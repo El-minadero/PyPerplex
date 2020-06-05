@@ -12,46 +12,90 @@ import os # os.system lets us access the command line
 import numpy as np # For np.array
 import pandas as pd # Pandas, for importing PerpleX text file output as data frames
 
-def configure(meltspath, scratchdir, composition, elements, batchstring, T_range, P_range, dT=-10, dP=0, index=1, version='pMELTS',mode='isobaric',fo2path='FMQ',fractionatesolids='!'):
-    
-    ############################ Default Settings ###############################
-    ##MELTS or pMELTS
-    #version='pMELTS';
-    ##Mode (isothermal, isobaric, isentropic, isenthalpic, isochoric, geothermal or PTPath)
-    #mode='isobaric';
-    ## Set fO2 constraint, i.e. 'IW','COH','FMQ','NNO','HM','None' as a string
-    #fo2path='FMQ';
-    ## Fractionate all solids? ('!' for no, '' for yes)
-    #fractionatesolids='!';
-    # Mass retained during fractionation
-    massin=0.001;
-    # Ouptut temperatures in celcius? ('!' for no, '' for yes)
-    celciusoutput='';
-    # Save all output? ('!' for no, '' for yes)
-    saveall='!';
-    # Fractionate all water? ('!' for no, '' for yes)
-    fractionatewater='!';
-    # Fractionate individual phases (specify as strings in cell array, i.e. {'olivine','spinel'})
-    fractionate=[];
-    # Supress individual phases (specify as strings in cell array, i.e. {'leucite'})
-    supress=[];
-    # Coninuous (fractional) melting? ('!' for no, '' for yes)
-    continuous='!';
-    # Threshold above which melt is extracted (if fractionation is turned on)
-    minf=0.005;
-    # Do trace element calculations
-    dotrace='!';
-    # Treat water as a trace element
-    dotraceh2o='!';
-    # Initial trace compositionT
-    tsc=[];
-    # Initial trace elements
-    telements=[];
-    # Default global constraints
-    Pmax=90000;
-    Pmin=2;
-    Tmax=3000;
-    Tmin=450;
+def configure(meltspath, scratchdir, batchstring,T_range, P_range,
+              dT=-10, dP=0, index=1,mass_retained=0.001,min_fractionation=0.005,
+              version='pMELTS',mode='isobaric',fo2path='FMQ',elements=[],composition=[],
+              trace_elements=[],trace_composition=[],phases_fractionated=[],phases_suppressed = [],
+              fractionate_solids=True,fractionate_water=True,continuous_fractionation_melting=False,
+              output_celsius=True,save_output=True,do_trace_elements=False,water_is_trace=False,
+              **kwargs):
+    """
+
+    Parameters
+    ----------
+    meltspath: str
+        Path to MELTS or pMELTS
+    scratchdir: str
+        A scratch directory path
+    composition: np.ndarray
+        An array of compositions corresponding to either wt% or mol%. Unsure.
+    elements: tuple
+        An array of elements to consider
+    batchstring:
+        not sure.
+    T_range: float or tuple(float)
+        A temperature or temperature range to apply. Unsure if in celcius or kelvin
+    P_range: float
+        A pressure or pressure range to apply in MPa
+    dT: float
+        temperature increments to explore (C? K?)
+    dP: float
+        pressure increments to explore (MPa?)
+    min_fractionation: float
+        threshold at which melt is removed
+    index: int
+        index?
+    version: str
+        unsure.
+    mode:
+        define mode as
+        isothermal, isobaric, isentropic, isenthalpic, isochoric, geothermal or PTPath
+    fo2path: str
+        set oxygen fugacity path/buffer. can be any of:
+        'FMQ','IW','COH','FMQ','NNO','HM','None'
+    fractionate_solids: bool
+        fractionate solids?
+    fractionate_water: bool
+        if should fractionate water
+    continuous_fractionation_melting: bool
+        if should continuously fractionate during melting
+    do_trace_elements: bool
+        if should fractionate trace elements
+    water_is_trace: bool
+        if should treat water as a trace element
+    output_celsius: bool
+        if perple_x should output celsius
+    save_output: bool
+        if perple_x should save output
+    mass_retained: float
+        mass retained during fractionation. default is 1e-3
+    min_fractionation: float
+        minimal mass needed to fractionate
+    phases_fractionated: list
+        a list of phases to be fractionated. ex: ['olivine','spinel']
+    phases_suppressed: list
+        a list of phases to suppress. ex: ['leucite']
+    trace_elements: list
+        a list of trace elements
+    trace_composition: list
+        a list of trace element starting composition
+    Returns
+    -------
+
+    """
+
+    celsius_out   ='' if output_celsius     else celsius_out='!'
+    save_all      ='' if save_output        else save_all='!'
+    frack_solids  ='' if fractionate_solids else frack_solids = '!'
+    frack_water   ='' if fractionate_water  else frack_water='!'
+    cont_melt     ='' if continuous_fractionation_melting else cont_melt ='!'
+    water_trace   ='' if water_is_trace     else water_trace = '!'
+    do_trace      ='' if do_trace_elements  else do_trace='!'
+
+    Pmax=90000
+    Pmin=2
+    Tmax=3000
+    Tmin=450
     # Simulation number (for folder, etc)
     
     ########################## end Default Settings ############################
@@ -60,165 +104,154 @@ def configure(meltspath, scratchdir, composition, elements, batchstring, T_range
     if T_range[1]<T_range[0]:
         Tmin=T_range[1]
     if T_range[1]>T_range[0]:
-        Tmax=T_range[1];
+        Tmax=T_range[1]
     if P_range[1]<P_range[0]:
-        Pmin=P_range[1];
+        Pmin=P_range[1]
     if P_range[1]>P_range[0]:
-        Pmax=P_range[1];
+        Pmax=P_range[1]
     
     # Normalize starting composition
-    composition = np.array(composition)/sum(composition)*100; 
+    composition = np.array(composition)/sum(composition)*100.0
     
     # output prefixectory name
-    prefix = scratchdir + 'out%i' %(index);
-    os.system('rm -rf %s; mkdir -p %s' %(prefix,prefix)); # Ensure directory is empty
+    prefix = scratchdir + os.sep + '{index}'
+    os.system(f'rm -rf {prefix}; mkdir -p {prefix}') # Ensure directory is empty
     
     # Make .melts file containing the starting composition you want to run
     # simulations on
-    fp=open(prefix + '/sc.melts','w');
-    for i in range(len(elements)):
-        fp.write('Initial Composition: %s %.4f\n' %(elements[i],composition[i]));
-    for i in range(len(telements)):
-        fp.write('Initial Trace: %s %.4f\n' %(telements[i],tsc[i]));
+    with open(prefix+os.sep + 'sc.melts','w') as melts:
+        for element,comp in zip(elements,composition):
+            melts.write(f'Initial Composition: {element} {comp:4f}\n')
+        for trace, comp in zip(trace_elements,trace_composition):
+            melts.write(f'Initial Trace: {trace} {comp:4f}\n')
         
-    fp.write('Initial Temperature: %.2f\nInitial Pressure: %.2f\nlog fo2 Path: %s\n' %(T_range[0],P_range[0],fo2path));
+        melts.write(f'Initial Temperature: {T_range[0]:2f}\n'+
+                 f'Initial Pressure: {P_range[0]:2f}\n'+
+                 f'log fo2 Path: {fo2path}\n')
     
-    for i in range(len(fractionate)):
-        fp.write('Fractionate: %s\n' %(fractionate[i]));
-    for i in range(len(supress)):
-        fp.write('Suppress: %s\n' %(supress[i])); 
-    fp.close();
-    
+        for phase in phases_fractionated:
+            melts.write(f'Fractionate: {phase}\n')
+        for phase in phases_suppressed:
+            melts.write(f'Suppress: {phase}\n')
     
     # Make melts_env file to specify type of MELTS calculation
-    fp=open(prefix + '/melts_env.txt','w');
-    fp.write('! *************************************\n!  Python-generated environment file\n! *************************************\n\n' + \
-        '! this variable chooses MELTS or pMELTS; for low-pressure use MELTS\n' + \
-        'ALPHAMELTS_VERSION		%s\n\n' %(version) + \
-        '! do not use this unless fO2 anomalies at the solidus are a problem\n' + \
-        '!ALPHAMELTS_ALTERNATIVE_FO2	true\n\n' + \
-        '! use this if you want to buffer fO2 for isentropic, isenthalpic or isochoric mode\n! e.g. if you are doing isenthalpic AFC\n' + \
-        '!ALPHAMELTS_IMPOSE_FO2		true\n\n' + \
-        '! use if you want assimilation and fractional crystallization (AFC)\n' + \
-        '!ALPHAMELTS_ASSIMILATE		true\n\n' + \
+    with open(f'{prefix}'+os.sep + 'melts_env.txt','w') as new_file:
+        new_file.write('! *************************************\n!  Python-generated environment file\n! *************************************\n\n' +
+        '! this variable chooses MELTS or pMELTS; for low-pressure use MELTS\n' +
+        f'ALPHAMELTS_VERSION		{version}\n\n' +
+        '! do not use this unless fO2 anomalies at the solidus are a problem\n' +
+        '!ALPHAMELTS_ALTERNATIVE_FO2	true\n\n' +
+        '! use this if you want to buffer fO2 for isentropic, isenthalpic or isochoric mode\n! e.g. if you are doing isenthalpic AFC\n' +
+        '!ALPHAMELTS_IMPOSE_FO2		true\n\n' +
+        '! use if you want assimilation and fractional crystallization (AFC)\n' +
+        '!ALPHAMELTS_ASSIMILATE		true\n\n' +
         '! isothermal, isobaric, isentropic, isenthalpic, isochoric, geothermal or PTPath\n' + \
-        'ALPHAMELTS_MODE			%s\n' %(mode) + \
+        f'ALPHAMELTS_MODE			{mode}\n'  + \
         '!ALPHAMELTS_PTPATH_FILE		ptpath.txt\n\n' + \
-        '! need to set DELTAP for polybaric paths; DELTAT for isobaric paths\nALPHAMELTS_DELTAP	%.0f\n' %(dP) + \
-        'ALPHAMELTS_DELTAT	%.0f\n' %(dT) + \
-        'ALPHAMELTS_MAXP		%.0f\n' %(Pmax) + \
-        'ALPHAMELTS_MINP		%.0f\n' %(Pmin) + \
-        'ALPHAMELTS_MAXT		%.0f\n' %(Tmax) + \
-        'ALPHAMELTS_MINT		%.0f\n\n' %(Tmin) + \
+        f'! need to set DELTAP for polybaric paths; DELTAT for isobaric paths\nALPHAMELTS_DELTAP	{dP:0f}\n' + \
+        f'ALPHAMELTS_DELTAT	{dT:1f}\n'  + \
+        f'ALPHAMELTS_MAXP		{Pmax:0f}\n' + \
+        f'ALPHAMELTS_MINP		{Pmin:0f}\n'  + \
+        f'ALPHAMELTS_MAXT		{Tmax:0f}\n'  + \
+        f'ALPHAMELTS_MINT		{Tmin:0f}\n\n'  + \
         '! this one turns on fractional crystallization for all solids\n! use Fractionate: in the melts file instead for selective fractionation\n' + \
-        '%sALPHAMELTS_FRACTIONATE_SOLIDS	true\n' %(fractionatesolids) + \
-        '%sALPHAMELTS_MASSIN		%g\n\n' %(fractionatesolids,massin) + \
+        f'{frack_solids}ALPHAMELTS_FRACTIONATE_SOLIDS	true\n'  + \
+        f'{frack_solids}ALPHAMELTS_MASSIN		{mass_retained:0.f}\n\n'  + \
         '! free water is unlikely but can be extracted\n' + \
-        '%sALPHAMELTS_FRACTIONATE_WATER	true\n' %(fractionatewater) + \
-        '%sALPHAMELTS_MINW			0.005\n\n' %(fractionatewater) + \
+        f'{frack_water}ALPHAMELTS_FRACTIONATE_WATER	true\n' + \
+        f'{frack_water}ALPHAMELTS_MINW			0.005\n\n'  + \
         '! the next one gives an output file that is always updated, even for single calculations\n' + \
-        '%sALPHAMELTS_SAVE_ALL		true\n' %(saveall)+ \
+        f'{save_all}ALPHAMELTS_SAVE_ALL		true\n'+ \
         '!ALPHAMELTS_SKIP_FAILURE		true\n\n' + \
         '! this option converts the output temperature to celcius, like the input\n' + \
-        '%sALPHAMELTS_CELSIUS_OUTPUT	true\n\n' %(celciusoutput) + \
+        f'{celsius_out}ALPHAMELTS_CELSIUS_OUTPUT	true\n\n'  + \
         '! the next two turn on and off fractional melting\n' + \
-        '%sALPHAMELTS_CONTINUOUS_MELTING	true\n' %(continuous) + \
-        '%sALPHAMELTS_MINF			%g\n' %(continuous,minf) + \
-        '%sALPHAMELTS_INTEGRATE_FILE	integrate.txt\n\n' %(continuous) + \
+        f'{cont_melt}ALPHAMELTS_CONTINUOUS_MELTING	true\n'  + \
+        f'{cont_melt}ALPHAMELTS_MINF			{min_fractionation:6.4f}\n'  + \
+        f'{cont_melt}ALPHAMELTS_INTEGRATE_FILE	integrate.txt\n\n'  + \
         '! the next two options refer to the trace element engine\n' + \
-        '%sALPHAMELTS_DO_TRACE		true\n' %(dotrace)+ \
-        '%sALPHAMELTS_DO_TRACE_H2O		true\n' %(dotraceh2o));
-    fp.close();
-    
+        f'{do_trace}ALPHAMELTS_DO_TRACE		true\n'+ \
+        f'{water_trace}ALPHAMELTS_DO_TRACE_H2O		true\n')
+
     # Make a batch file to run the above .melts file starting from the liquidus
-    fp = open(prefix + '/batch.txt','w');
-    fp.write(batchstring);
-    fp.close();
+    with open('{prefix}' + os.sep + 'batch.txt', 'w') as batch:
+        batch.write(batchstring)
     
     # Run the command
     # Edit the following line(s to make sure you have a correct path to the 'run_alphamelts.command' perl script
-    os.system('cd ' + prefix  + '; ' + meltspath + ' -f melts_env.txt -b batch.txt');
-    return;
+    os.system('cd ' + prefix  + '; ' + meltspath + ' -f melts_env.txt -b batch.txt')
+    return
 
 
 # Get modal phase proportions, return as pandas DataFrame
 def query(scratchdir, index=1):
-    prefix = scratchdir + 'out%i/' %(index); # path to data files
-    # n_header_lines = 1;
-    
-    # Read results and return them if possible
-    try:
-        # Returns results as text string
-        fp = open(prefix + 'Phase_main_tbl.txt','r');
-        data = fp.read(); 
-        fp.close();
-    except:
-        data = '';
-    return data;
+    prefix = scratchdir + f'out{index}/'  # path to data files
+    file = prefix + 'Phase_main_tbl.txt'
+    return pd.read_csv(file)
 
 # Get modal phase proportions, return as pandas DataFrame
 def query_modes(scratchdir, index=1):
-    prefix = scratchdir + 'out%i/' %(index); # path to data files
-    n_header_lines = 1;
+    prefix = scratchdir + f'out{index}/'  # path to data files
+    n_header_lines = 1
     
     # Read results and return them if possible
     try:
-        data = pd.read_csv(prefix + 'Phase_mass_tbl.txt', delim_whitespace=True, header=n_header_lines);
+        data = pd.read_csv(prefix + 'Phase_mass_tbl.txt', delim_whitespace=True, header=n_header_lines)
                 # Ensure columns are numeric
 
         for c in data.columns:
             if data[c].dtype!='float64':
                 data[c] = np.genfromtxt(data[c])
     except:
-        data = 0;
-    return data;
+        data = 0
+    return data
 
 
 # Get liquid composition, return as pandas DataFrame
 def query_liquid(scratchdir, index=1):
-    prefix = scratchdir + 'out%i/' %(index); # path to data files
-    n_header_lines = 1;
+    prefix = scratchdir + f'out{index}/'  # path to data files
+    n_header_lines = 1
     
     # Read results and return them if possible
     try:
-        data = pd.read_csv(prefix + 'Liquid_comp_tbl.txt', delim_whitespace=True, header=n_header_lines);
+        data = pd.read_csv(prefix + 'Liquid_comp_tbl.txt', delim_whitespace=True, header=n_header_lines)
         # Ensure columns are numeric
         for c in data.columns:
             if data[c].dtype!='float64':
                 data[c] = np.genfromtxt(data[c])
     except:
-        data = 0;
-    return data;
+        data = 0
+    return data
 
 
 # Read solid composition, return as pandas DataFrame
 def query_solid(scratchdir, index=1):
-    prefix = scratchdir + 'out%i/' %(index); # path to data files
-    n_header_lines = 1;
+    prefix = scratchdir + f'out{index}/' # path to data files
+    n_header_lines = 1
     
     # Read results and return them if possible
     try:
-        data = pd.read_csv(prefix + 'Solid_comp_tbl.txt', delim_whitespace=True, header=n_header_lines);
+        data = pd.read_csv(prefix + 'Solid_comp_tbl.txt', delim_whitespace=True, header=n_header_lines)
         # Ensure columns are numeric
         for c in data.columns:
             if data[c].dtype!='float64':
                 data[c] = np.genfromtxt(data[c])
     except:
-        data = 0;
-    return data;
+        data = 0
+    return data
 
 # Read system thermodynamic data, return as pandas DataFrame
 def query_system(scratchdir, index=1):
-    prefix = scratchdir + 'out%i/' %(index); # path to data files
-    n_header_lines = 1;
+    prefix = scratchdir + f'out{index}/' # path to data files
+    n_header_lines = 1
     
     # Read results and return them if possible
     try:
-        data = pd.read_csv(prefix + 'System_main_tbl.txt', delim_whitespace=True, header=n_header_lines);
+        data = pd.read_csv(prefix + 'System_main_tbl.txt', delim_whitespace=True, header=n_header_lines)
         # Ensure columns are numeric
         for c in data.columns:
             if data[c].dtype!='float64':
                 data[c] = np.genfromtxt(data[c])
     except:
-        data = 0;
-    return data;
+        data = 0
+    return data
